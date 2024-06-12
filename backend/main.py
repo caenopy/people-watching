@@ -18,7 +18,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-model = YOLO('yolov8s.pt')
+model = YOLO('best_061124.pt')
 
 class ImageData(BaseModel):
     image: str

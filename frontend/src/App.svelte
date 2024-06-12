@@ -1,19 +1,43 @@
 <script>
-	import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
 
-	let videoElement;
-	let canvasElement;
-	let stream;
-	let detectionResults = [];
+    let USE_WEBCAM = false;
 
-	const colorMap = {
-		person: 'red',
-		bus: 'blue',
-		car: 'green',
+    let videoElement;
+    let snapshotElement;
+    let annotationsElement;
+    let stream;
+    let interval;
+    let detectionResults = [];
+
+    const colorMap = {
+		otter: 'red',
+		ball: 'orange',
+		person: 'green',
 		// Add more object classes and their colors here
 	};
 
-	async function startWebcam() {
+    onMount(() => {
+        videoElement.addEventListener('play', () => {
+            interval = setInterval(captureFrame, 500); // Capture frame every 5 seconds
+        });
+
+        videoElement.addEventListener('pause', () => {
+            clearInterval(interval);
+        });
+
+        videoElement.addEventListener('ended', () => {
+            clearInterval(interval);
+        });
+
+        if (USE_WEBCAM) {
+			startWebcam();
+		} else {
+			loadPredefinedVideo();
+		}
+    });
+
+    async function startWebcam() {
 		try {
 			const constraints = {
 				video: {
@@ -24,54 +48,55 @@
 			};
 			stream = await navigator.mediaDevices.getUserMedia(constraints);
 			videoElement.srcObject = stream;
-			videoElement.addEventListener('loadedmetadata', setCanvasSize);
+            videoElement.addEventListener('loadedmetadata', setCanvasSize);
 			await videoElement.play();
-			captureFrames();
-			drawCanvas();
 		} catch (error) {
 			console.error('Error accessing webcam:', error);
 		}
 	}
 
-	function setCanvasSize() {
+    function setCanvasSize() {
 		if (videoElement.videoWidth && videoElement.videoHeight) {
-			canvasElement.width = videoElement.videoWidth;
-			canvasElement.height = videoElement.videoHeight;
-			canvasElement.style.width = '100%';
-			canvasElement.style.height = 'auto';
-			console.log(`Canvas size set to: ${canvasElement.width}x${canvasElement.height}`);
+			annotationsElement.width = videoElement.videoWidth;
+			annotationsElement.height = videoElement.videoHeight;
+            snapshotElement.width = videoElement.videoWidth;
+			snapshotElement.height = videoElement.videoHeight;
+			console.log(`Canvas size set to: ${annotationsElement.width}x${annotationsElement.height}`);
 		}
 	}
 
-	function captureFrames() {
-		setInterval(async () => {
-			const context = canvasElement.getContext('2d');
-			context.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-			const imageData = canvasElement.toDataURL('image/jpeg');
-			await sendFrameToBackend(imageData);
-		}, 1000); // Adjust the interval as needed
-	}
+    function loadPredefinedVideo() {
+        videoElement.src = '/2024-05-14_13_30_highlight.mp4';
+        videoElement.addEventListener('loadedmetadata', setCanvasSize);
+    }
 
-	async function sendFrameToBackend(imageData) {
-		try {
+    function captureFrame() {
+        const context = snapshotElement.getContext('2d');
+        context.drawImage(videoElement, 0, 0, snapshotElement.width, snapshotElement.height);
+        const frame = snapshotElement.toDataURL('image/jpeg');
+        sendFrameToBackend(frame);
+        drawDetections();
+    }
+
+    async function sendFrameToBackend(frame) {
+        try {
 			const response = await fetch('http://localhost:8000/detect', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
-				body: JSON.stringify({ image: imageData })
+				body: JSON.stringify({ image: frame})
 			});
 			const data = await response.json();
 			detectionResults = data;
 		} catch (error) {
 			console.error('Error sending frame to backend:', error);
 		}
-	}
+    }
 
-	function drawDetections() {
-		const context = canvasElement.getContext('2d');
-		context.clearRect(0, 0, canvasElement.width, canvasElement.height);
-		context.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+    function drawDetections() {
+		const context = annotationsElement.getContext('2d');
+		context.clearRect(0, 0, annotationsElement.width, annotationsElement.height);
 
 		detectionResults.forEach(result => {
 			const color = colorMap[result.object] || 'yellow'; // Default to yellow if object class not in colorMap
@@ -85,58 +110,26 @@
 			context.fillText(text, result.xmin, result.ymin > 20 ? result.ymin - 5 : result.ymin + 20);
 		});
 	}
-
-	function drawCanvas() {
-		const context = canvasElement.getContext('2d');
-
-		function draw() {
-			context.clearRect(0, 0, canvasElement.width, canvasElement.height);
-			context.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-			drawDetections();
-			requestAnimationFrame(draw);
-		}
-
-		requestAnimationFrame(draw);
-	}
-
-	onMount(() => {
-		startWebcam();
-	});
-
-	onDestroy(() => {
-		if (stream) {
-			stream.getTracks().forEach(track => track.stop());
-		}
-	});
 </script>
 
-<main>
-	<h1>People Watching</h1>
-	<video bind:this={videoElement} autoplay playsinline style="display: none;"></video>
-	<canvas bind:this={canvasElement}></canvas>
-</main>
-
 <style>
-	main {
-		text-align: center;
-		padding: 1em;
-	}
-
-	canvas {
-		width: 100%;  /* Ensures responsiveness while maintaining high resolution */
-		border: 1px solid black; /* Optional, adds border around the canvas */
-	}
-
-	h1 {
-		color: #ff3e00;
-		text-transform: lowercase;
-		font-size: 2em;
-		font-weight: 100;
-	}
-
-	.detection {
-		margin: 1em 0;
-		font-size: 1.2em;
-		color: #333;
-	}
+    .video-container {
+        position: relative;
+    }
+    .annotations-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+    }
 </style>
+
+<div class="video-container">
+    {#if !USE_WEBCAM}
+        <video bind:this={videoElement} autoplay playsinline controls></video>
+    {/if}
+    {#if USE_WEBCAM}
+        <video bind:this={videoElement} autoplay playsinline></video>
+    {/if}
+    <canvas bind:this={snapshotElement} style="display: none; pointer-events: none;"></canvas>
+    <canvas bind:this={annotationsElement} class="annotations-canvas" style="pointer-events: none;"></canvas>
+</div>
